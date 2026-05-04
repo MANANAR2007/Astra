@@ -10,13 +10,13 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
+    "@google/generative-ai": "^0.24.1",
     "@vitejs/plugin-react": "^5.0.0",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tesseract.js": "^6.0.0"
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
