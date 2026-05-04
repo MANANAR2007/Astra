@@ -1,6 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-let genAI;
+let ai;
 
 function getClient() {
   if (!process.env.GEMINI_API_KEY) {
@@ -9,35 +9,24 @@ function getClient() {
     throw error;
   }
 
-  if (!genAI) {
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  if (!ai) {
+    ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY
+    });
   }
 
-  return genAI;
+  return ai;
 }
 
-export async function generateWithGemini(prompt) {
-  try {
-    const client = getClient();
+export async function generateWithGemini(contents) {
+  const client = getClient();
 
-    const model = client.getGenerativeModel({
-      model: "gemini-1.5-flash"
-    });
+  const response = await client.models.generateContent({
+    model: "gemini-2.0-flash",
+    contents
+  });
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-
-    const text = response.text();
-
-    if (!text) {
-      throw new Error("Empty response from Gemini");
-    }
-
-    return text;
-  } catch (err) {
-    console.error("Gemini Error:", err);
-    throw new Error(err.message || "Gemini API failed");
-  }
+  return response.text;
 }
 
 export function parseJsonResponse(text) {
@@ -64,7 +53,7 @@ export function parseJsonResponse(text) {
     const end = cleaned.lastIndexOf(closeChar);
 
     if (end <= start) {
-      throw new Error("Incomplete JSON from Gemini.");
+      throw new Error("Gemini did not return complete JSON.");
     }
 
     return JSON.parse(cleaned.slice(start, end + 1));
