@@ -21,7 +21,7 @@ export function getGemini() {
 export async function generateWithGemini(contents) {
   const client = getGemini();
   const response = await client.models.generateContent({
-    model: "gemini-1.5-flash",
+    model: "gemini-1.5-flash-latest",
     contents
   });
 
