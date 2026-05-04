@@ -1,32 +1,44 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-let genAI;
+let ai;
 
-function getClient() {
+export function getGemini() {
   if (!process.env.GEMINI_API_KEY) {
     const error = new Error("Missing GEMINI_API_KEY environment variable.");
     error.statusCode = 500;
     throw error;
   }
 
-  if (!genAI) {
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  if (!ai) {
+    ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY
+    });
   }
 
-  return genAI;
+  return ai;
 }
 
-export async function generateWithGemini(prompt) {
-  const client = getClient();
-
-  const model = client.getGenerativeModel({
-    model: "gemini-1.5-flash"
+export async function generateWithGemini(contents) {
+  const client = getGemini();
+  const response = await client.models.generateContent({
+    model: "gemini-2.0-flash",
+    contents
   });
 
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
+  return extractResponseText(response);
+}
 
-  return response.text();
+export function extractResponseText(response) {
+  if (typeof response?.text === "function") {
+    return response.text();
+  }
+
+  if (typeof response?.text === "string") {
+    return response.text;
+  }
+
+  const parts = response?.candidates?.[0]?.content?.parts || [];
+  return parts.map((part) => part.text || "").join("\n").trim();
 }
 
 export function parseJsonResponse(text) {
@@ -41,16 +53,20 @@ export function parseJsonResponse(text) {
   } catch {
     const objectStart = cleaned.indexOf("{");
     const arrayStart = cleaned.indexOf("[");
-    const starts = [objectStart, arrayStart].filter((i) => i >= 0);
+    const starts = [objectStart, arrayStart].filter((index) => index >= 0);
 
     if (!starts.length) {
-      throw new Error("Gemini did not return valid JSON.");
+      throw new Error("Gemini did not return parseable JSON.");
     }
 
     const start = Math.min(...starts);
     const openChar = cleaned[start];
     const closeChar = openChar === "{" ? "}" : "]";
     const end = cleaned.lastIndexOf(closeChar);
+
+    if (end <= start) {
+      throw new Error("Gemini did not return complete JSON.");
+    }
 
     return JSON.parse(cleaned.slice(start, end + 1));
   }
