@@ -4,8 +4,9 @@ Astra is a full-stack AI-powered study companion built with React, Tailwind CSS,
 
 ## Features
 
-- Upload a PDF or image and extract study text.
-- Generate structured notes with Gemini.
+- Upload a PDF or image and extract study text in the browser.
+- Send only extracted text to Vercel serverless functions.
+- Generate structured notes with Gemini through `/api/extract`.
 - Create MCQ quizzes with explanations.
 - Turn content and missed quiz questions into spaced-repetition flashcards.
 - Track topics, accuracy, weak questions, and cards due in a dashboard.
@@ -41,3 +42,5 @@ npm run dev:vercel
 ## Deployment
 
 Deploy on Vercel and add `GEMINI_API_KEY` in Project Settings → Environment Variables. The key is only used in serverless functions and is never exposed to the browser.
+
+Files are never uploaded to the backend. PDF extraction uses `pdfjs-dist` on the frontend, image OCR uses `tesseract.js` on the frontend, and the API receives JSON shaped like `{ "text": "..." }`.

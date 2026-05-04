@@ -115,6 +115,84 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function isPdfFile(file) {
+  return file?.type === "application/pdf" || /\.pdf$/i.test(file?.name || "");
+}
+
+function isImageFile(file) {
+  return /^image\//.test(file?.type || "") || /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(file?.name || "");
+}
+
+async function extractPdfText(file) {
+  const [pdfjsLib, pdfWorker] = await Promise.all([
+    import("pdfjs-dist/legacy/build/pdf.mjs"),
+    import("pdfjs-dist/legacy/build/pdf.worker.mjs?url")
+  ]);
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker.default;
+
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item) => item.str || "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (pageText) {
+      pages.push(pageText);
+    }
+  }
+
+  return {
+    text: pages.join("\n\n"),
+    metadata: {
+      filename: file.name,
+      fileType: file.type || "application/pdf",
+      pages: pdf.numPages,
+      extractedOn: "frontend"
+    }
+  };
+}
+
+async function extractImageText(file) {
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("eng");
+
+  try {
+    const result = await worker.recognize(file);
+
+    return {
+      text: result.data.text,
+      metadata: {
+        filename: file.name,
+        fileType: file.type || "image",
+        confidence: Math.round(result.data.confidence || 0),
+        extractedOn: "frontend"
+      }
+    };
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function extractTextFromFile(file) {
+  if (isPdfFile(file)) {
+    return extractPdfText(file);
+  }
+
+  if (isImageFile(file)) {
+    return extractImageText(file);
+  }
+
+  throw new Error("Choose a PDF or image file.");
+}
+
 export default function App() {
   const [page, setPageState] = useState(getInitialPage);
   const [store, setStore] = usePersistentStore();
@@ -198,23 +276,22 @@ export default function App() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
-
     setStatus({ loading: "extract", error: "", notice: "" });
 
     try {
-      const payload = await requestJson("/api/extract", {
-        method: "POST",
-        body: formData
-      });
+      const payload = await extractTextFromFile(selectedFile);
+      const extractedText = String(payload.text || "").trim();
+
+      if (!extractedText) {
+        throw new Error("No readable text was found in this file.");
+      }
 
       const topic = {
         id: createId("topic"),
         title: compactFileName(payload.metadata?.filename || selectedFile.name),
         fileName: payload.metadata?.filename || selectedFile.name,
         metadata: payload.metadata,
-        extractedText: payload.text,
+        extractedText,
         notes: null,
         quiz: [],
         incorrectAnswers: [],
@@ -228,7 +305,7 @@ export default function App() {
         activeTopicId: topic.id,
         topics: [topic, ...current.topics]
       }));
-      setStatus({ loading: "", error: "", notice: "Text extracted. Ready for notes." });
+      setStatus({ loading: "", error: "", notice: "Text extracted locally. Ready for notes." });
     } catch (error) {
       setStatus({ loading: "", error: error.message, notice: "" });
     }
@@ -244,7 +321,7 @@ export default function App() {
     setStatus({ loading: "notes", error: "", notice: "" });
 
     try {
-      const payload = await requestJson("/api/generate", {
+      const payload = await requestJson("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: activeTopic.extractedText })
@@ -616,7 +693,7 @@ function UploadPage({
         <PageTitle
           eyebrow="Upload Notes"
           title="Extract clean study text."
-          body="PDFs are parsed on the server. Images use OCR before anything is sent to Gemini."
+          body="PDFs and images are processed in your browser. Astra sends only extracted text to the AI backend."
         />
         <Card className="mt-6 p-5">
           <label

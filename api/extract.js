@@ -1,80 +1,15 @@
-import Busboy from "busboy";
-import pdfParse from "pdf-parse";
-import { createWorker } from "tesseract.js";
-import { rejectMethod, sendJson } from "./_utils/http.js";
+import { generateWithGemini, parseJsonResponse } from "./_utils/gemini.js";
+import { readJsonBody, rejectMethod, sendJson, trimInput } from "./_utils/http.js";
 
-const MAX_FILE_SIZE = 12 * 1024 * 1024;
-
-function parseMultipart(req) {
-  return new Promise((resolve, reject) => {
-    const busboy = Busboy({
-      headers: req.headers,
-      limits: {
-        files: 1,
-        fileSize: MAX_FILE_SIZE
-      }
-    });
-
-    let uploadedFile = null;
-    let limitHit = false;
-
-    busboy.on("file", (_fieldName, file, info) => {
-      const chunks = [];
-      const { filename, mimeType } = info;
-
-      file.on("data", (chunk) => chunks.push(chunk));
-      file.on("limit", () => {
-        limitHit = true;
-        file.resume();
-      });
-      file.on("end", () => {
-        uploadedFile = {
-          buffer: Buffer.concat(chunks),
-          filename,
-          mimeType
-        };
-      });
-    });
-
-    busboy.on("error", reject);
-    busboy.on("finish", () => {
-      if (limitHit) {
-        reject(new Error("File is larger than 12MB."));
-        return;
-      }
-
-      if (!uploadedFile) {
-        reject(new Error("No file was uploaded."));
-        return;
-      }
-
-      resolve(uploadedFile);
-    });
-
-    req.pipe(busboy);
-  });
-}
-
-function isPdf(file) {
-  return file.mimeType === "application/pdf" || /\.pdf$/i.test(file.filename || "");
-}
-
-function isImage(file) {
-  return /^image\//.test(file.mimeType || "") || /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(file.filename || "");
-}
-
-async function extractImageText(buffer) {
-  const worker = await createWorker("eng");
-
-  try {
-    const result = await worker.recognize(buffer);
-    return {
-      text: result.data.text,
-      confidence: Math.round(result.data.confidence || 0)
-    };
-  } finally {
-    await worker.terminate();
-  }
+function normalizeNotes(parsed, raw) {
+  return {
+    title: String(parsed.title || "Study Notes").trim(),
+    basics: Array.isArray(parsed.basics) ? parsed.basics.map(String) : [],
+    keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts.map(String) : [],
+    importantPoints: Array.isArray(parsed.importantPoints) ? parsed.importantPoints.map(String) : [],
+    summary: String(parsed.summary || "").trim(),
+    raw
+  };
 }
 
 export default async function handler(req, res) {
@@ -83,48 +18,42 @@ export default async function handler(req, res) {
   }
 
   try {
-    const file = await parseMultipart(req);
-    let extracted = null;
-    let metadata = {
-      filename: file.filename,
-      fileType: file.mimeType
-    };
+    const { text } = await readJsonBody(req);
+    const content = trimInput(text);
 
-    if (isPdf(file)) {
-      const result = await pdfParse(file.buffer);
-      extracted = result.text;
-      metadata = {
-        ...metadata,
-        pages: result.numpages
-      };
-    } else if (isImage(file)) {
-      const result = await extractImageText(file.buffer);
-      extracted = result.text;
-      metadata = {
-        ...metadata,
-        confidence: result.confidence
-      };
-    } else {
-      sendJson(res, 400, { error: "Upload a PDF or image file." });
+    if (!content) {
+      sendJson(res, 400, { error: "Extracted text is required." });
       return;
     }
 
-    const text = String(extracted || "").trim();
-    if (!text) {
-      sendJson(res, 422, {
-        error: "No readable text was found in this file.",
-        metadata
-      });
-      return;
-    }
+    const result = await generateWithGemini(`
+Convert this into structured study notes:
+- Basics
+- Key Concepts
+- Important Points
+
+Return only valid JSON with this shape:
+{
+  "title": "short topic title",
+  "summary": "one concise study summary",
+  "basics": ["plain-language foundation point"],
+  "keyConcepts": ["core concept with definition"],
+  "importantPoints": ["exam-worthy point or caveat"]
+}
+
+Content:
+${content}
+`);
+
+    const parsed = parseJsonResponse(result);
 
     sendJson(res, 200, {
-      text,
-      metadata
+      result,
+      notes: normalizeNotes(parsed, result)
     });
-  } catch (error) {
-    sendJson(res, 500, {
-      error: error.message || "Text extraction failed."
+  } catch (err) {
+    sendJson(res, err.statusCode || 500, {
+      error: err.message || "Could not generate structured study notes."
     });
   }
 }
