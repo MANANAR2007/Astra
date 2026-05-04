@@ -1,0 +1,19 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/extract.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/generate.js": {
+      "maxDuration": 60
+    },
+    "api/quiz.js": {
+      "maxDuration": 60
+    },
+    "api/flashcards.js": {
+      "maxDuration": 60
+    }
+  }
+}
